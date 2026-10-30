@@ -133,6 +133,13 @@ button{cursor:pointer}
 .enter-btn{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;margin-top:22px;border:0;border-radius:24px;padding:14px 12px 14px 24px;background:var(--solid);color:var(--on-solid);font-weight:800;font-size:17px;text-align:left;box-shadow:0 18px 40px -16px var(--shadow)}
 .enter-btn .circ{flex:0 0 auto;width:42px;height:42px;border-radius:50%;border:1.5px solid currentColor;display:grid;place-items:center}
 @media (prefers-reduced-motion:reduce){.sign{animation:none}}
+.sign-wrap{opacity:0;transition:opacity .3s}
+.sign-wrap.ready{opacity:1}
+.sign.closed{background:var(--card);color:var(--solid);box-shadow:0 0 0 2px var(--solid) inset;animation:none;transform:rotate(-5deg);font-size:17px;padding:6px 18px 8px;letter-spacing:.02em}
+.notify{margin-top:22px;background:var(--card);border-radius:24px;padding:22px 20px;border:2px solid var(--solid)}
+.notify h2{font-family:"Fraunces",Georgia,serif;font-size:23px;font-weight:800;letter-spacing:-.01em;margin:0}
+.n-note{color:var(--muted);font-weight:600;font-size:14px;margin:6px 0 14px}
+.notify .cta{margin-top:16px}
 h1{margin:0;font-size:clamp(26px,5vw,34px);font-weight:800;letter-spacing:-.02em;line-height:1.1}
 .cartfab{position:relative;flex:0 0 auto;width:58px;height:58px;border:0;background:var(--solid);color:var(--on-solid);border-radius:22px 22px 22px 6px;display:grid;place-items:center}
 .cartfab svg{width:24px;height:24px}
@@ -298,7 +305,7 @@ label.f:first-child{margin-top:0}
   <section class="welcome" id="welcome" aria-labelledby="wTitle">
     <div class="awning-wrap" aria-hidden="true"><div class="awning"></div></div>
 
-    <div class="sign-wrap" aria-hidden="true"><div class="sign">open for pre-orders</div></div>
+    <div class="sign-wrap" id="signWrap" aria-hidden="true"><div class="sign" id="signText">open for pre-orders</div></div>
     <div class="window">
       <img class="w-logo" data-logo alt="Sourdough by Kat">
       <h1 id="wTitle" class="sr">Sourdough by Kat</h1>
@@ -310,6 +317,18 @@ label.f:first-child{margin-top:0}
       <span>See this week’s menu</span>
       <span class="circ" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
     </button>
+
+    <div class="notify" id="notifyBox" hidden>
+      <form id="notifyForm" novalidate>
+        <h2>Get notified when we reopen</h2>
+        <p class="n-note">Leave your email, phone number, or both, and Kat will let you know when the next pre-orders open.</p>
+        <label class="f" for="nEmail">Email</label><input class="in" id="nEmail" type="email" autocomplete="email" maxlength="100" placeholder="you@email.com">
+        <label class="f" for="nPhone">Phone</label><input class="in" id="nPhone" type="tel" autocomplete="tel" maxlength="30" placeholder="(732) 555-0123">
+        <p class="err" id="nErr" role="alert" hidden></p>
+        <button class="cta" id="nBtn" type="submit">Notify me</button>
+      </form>
+      <div id="notifyDone" hidden><h2>You’re on the list! 🫶🏼</h2><p class="n-note">We’ll let you know as soon as the next drop opens.</p></div>
+    </div>
 
     <div class="bag">
       <div class="label-card">
@@ -398,6 +417,7 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzc5OqGvLbDdMIBvgjflC1H
   ]};
 
   let data = null, active = null, cart = {}, mode = "cart", demoNum = 101;
+  let shopOpen = null; /* null until loaded, then true or false */
   const form = {name:"", phone:"", slot:"", pay:"zelle"};
   const $ = id => document.getElementById(id);
   const money = n => "$" + Number(n).toFixed(n % 1 ? 2 : 0);
@@ -445,6 +465,9 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzc5OqGvLbDdMIBvgjflC1H
       if(DEMO){ j = data || JSON.parse(JSON.stringify(SAMPLE)); $("demoNote").hidden = location.hash !== "#menu"; }
       else { const r = await fetch(API_URL, {cache:"no-store"}); j = await r.json(); if(!j.ok) throw 0; }
       data = j;
+      shopOpen = DEMO ? location.hash !== "#closed" : j.shopOpen !== false;
+      applyShop();
+      if(!shopOpen){ active = null; cart = {}; renderBar(); return; }
       $("bakeryName").setAttribute("aria-label", "About " + data.bakery);
       document.title = data.bakery;
       /* One menu at a time: show the first drop that's taking orders */
@@ -458,6 +481,7 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzc5OqGvLbDdMIBvgjflC1H
       checkPhotos();
       render();
     }catch(e){
+      if(shopOpen === null){ shopOpen = true; applyShop(); }
       $("status").textContent = "The menu couldn't load. Refresh the page to try again.";
       $("status").hidden = false;
     }
@@ -696,9 +720,20 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzc5OqGvLbDdMIBvgjflC1H
   })();
 
   /* Welcome page first; #menu goes straight to the menu */
+  function applyShop(){
+    const known = shopOpen !== null, closed = shopOpen === false, menu = location.hash === "#menu";
+    $("signText").textContent = closed ? "sold out" : "open for pre-orders";
+    $("signText").classList.toggle("closed", closed);
+    $("signWrap").classList.toggle("ready", known);
+    $("enterBar").hidden = menu || !known || closed;
+    $("notifyBox").hidden = menu || !closed;
+  }
   function showView(){
+    if(DEMO && data) shopOpen = location.hash !== "#closed";
     const menu = location.hash === "#menu";
-    $("welcome").hidden = menu; $("menuView").hidden = !menu; $("enterBar").hidden = menu;
+    if(menu && shopOpen === false){ location.hash = "about"; return; }
+    $("welcome").hidden = menu; $("menuView").hidden = !menu;
+    applyShop();
     if(DEMO) $("demoNote").hidden = !menu;
     if(data) renderBar(); else { $("fabCount").hidden = true; }
     if(!menu && isOpen()) closeSheet();
@@ -707,6 +742,38 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzc5OqGvLbDdMIBvgjflC1H
   $("enterBar").addEventListener("click", () => { location.hash = "menu"; });
   $("bakeryName").addEventListener("click", () => { location.hash = "about"; });
   window.addEventListener("hashchange", showView);
+  /* Preview only: switch between the open and sold-out looks */
+  if(DEMO){
+    const t = document.createElement("button");
+    t.type = "button";
+    t.style.cssText = "position:fixed;right:12px;top:calc(12px + env(safe-area-inset-top,0px));z-index:20;border:0;border-radius:999px;padding:8px 14px;font:700 13px Manrope,system-ui,sans-serif;background:var(--ink);color:var(--card);box-shadow:0 6px 16px -6px rgba(0,0,0,.4)";
+    const label = () => t.textContent = location.hash === "#closed" ? "Preview: show open shop" : "Preview: show closed shop";
+    label();
+    t.addEventListener("click", () => { location.hash = location.hash === "#closed" ? "about" : "closed"; });
+    window.addEventListener("hashchange", label);
+    document.body.appendChild(t);
+  }
+
+  /* Notify list sign-up (shown when the shop is closed) */
+  $("notifyForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const email = $("nEmail").value.trim(), phone = $("nPhone").value.trim(), err = $("nErr"), btn = $("nBtn");
+    err.hidden = true;
+    if(!email && !phone){ err.textContent = "Add an email or a phone number."; err.hidden = false; return; }
+    if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ err.textContent = "Check your email address."; err.hidden = false; return; }
+    if(phone && phone.replace(/\D/g, "").length < 10){ err.textContent = "Check your phone number."; err.hidden = false; return; }
+    btn.disabled = true; btn.textContent = "Signing you up…";
+    try{
+      let j = {ok:true};
+      if(!DEMO){ const r = await fetch(API_URL, {method:"POST", body: JSON.stringify({action:"notify", email, phone})}); j = await r.json(); }
+      if(!j.ok){ err.textContent = j.error || "That didn’t go through. Try again."; err.hidden = false; return; }
+      $("notifyForm").hidden = true; $("notifyDone").hidden = false;
+    }catch(x){
+      err.textContent = "That didn’t go through. Check your connection and try again."; err.hidden = false;
+    }finally{
+      btn.disabled = false; btn.textContent = "Notify me";
+    }
+  });
   showView();
   load(false);
 })();
