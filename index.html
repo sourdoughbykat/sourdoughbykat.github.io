@@ -229,11 +229,23 @@ h1{margin:0;font-size:clamp(26px,5vw,34px);font-weight:800;letter-spacing:-.02em
 .stepper span{min-width:18px;text-align:center;font-weight:800}
 
 /* Floating order bar */
-.bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));width:min(560px,calc(100% - 32px));background:var(--solid);color:var(--on-solid);border:0;border-radius:24px;padding:12px 12px 12px 22px;display:flex;justify-content:space-between;align-items:center;gap:12px;z-index:5;text-align:left;box-shadow:0 18px 40px -12px var(--shadow)}
+.bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));width:min(560px,calc(100% - 32px));background:var(--solid);color:var(--on-solid);border:0;border-radius:24px;padding:12px 12px 12px 22px;display:block;z-index:5;text-align:left;box-shadow:0 18px 40px -12px var(--shadow)}
+.bar-main{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .bar b{font-size:16px}
-.bar small{display:block;opacity:.7;font-size:13px;font-weight:500}
-.bar .go{display:flex;align-items:center;gap:10px;font-weight:700}
-.bar .circ{width:40px;height:40px;border-radius:50%;border:1.5px solid currentColor;display:grid;place-items:center}
+.bar small{display:block;opacity:.75;font-size:13px;font-weight:600}
+.bar .go{display:flex;align-items:center;gap:8px;background:var(--on-solid);color:var(--solid);border-radius:999px;padding:6px 6px 6px 18px;font-weight:800;font-size:16px;white-space:nowrap}
+.bar .circ{width:34px;height:34px;border-radius:50%;background:var(--solid);color:var(--on-solid);display:grid;place-items:center}
+.bar-added{display:block;max-height:0;opacity:0;overflow:hidden;font-size:14px;font-weight:700;transition:max-height .3s ease,opacity .3s ease,margin .3s ease}
+.bar.show-added .bar-added{max-height:60px;opacity:1;margin:0 0 10px}
+.bar.enter-anim{animation:bar-in .5s cubic-bezier(.2,1.2,.4,1)}
+.bar.bump{animation:bar-bump .45s ease}
+.bar.bump .go{animation:go-glow 1.2s ease}
+@keyframes bar-in{from{transform:translate(-50%,140%)}to{transform:translate(-50%,0)}}
+@keyframes bar-bump{0%,100%{transform:translateX(-50%) scale(1)}40%{transform:translateX(-50%) scale(1.04)}}
+@keyframes go-glow{0%,100%{box-shadow:0 0 0 0 rgba(242,181,68,0)}30%{box-shadow:0 0 0 6px rgba(242,181,68,.55)}}
+.cartfab .count.pop{animation:count-pop .4s ease}
+@keyframes count-pop{40%{transform:scale(1.35)}}
+@media (prefers-reduced-motion:reduce){.bar.enter-anim,.bar.bump,.bar.bump .go,.cartfab .count.pop{animation:none}.bar-added{transition:none}}
 
 /* Order sheet */
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:8;opacity:0;pointer-events:none;transition:opacity .2s}
@@ -412,9 +424,12 @@ label.f:first-child{margin-top:0}
 
 
 
-<button class="bar" id="bar" hidden>
-  <span><b id="barCount">0 items</b><small id="barDrop"></small></span>
-  <span class="go"><span id="barTotal">$0</span><span class="circ" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></span>
+<button class="bar" id="bar" hidden aria-label="Review your order and check out">
+  <span class="bar-added" id="barAdded" aria-live="polite"></span>
+  <span class="bar-main">
+    <span class="bar-sum"><b id="barCount">0 items</b><small><span id="barTotal">$0</span> · <span id="barDrop"></span></small></span>
+    <span class="go">Checkout<span class="circ" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span></span>
+  </span>
 </button>
 
 <div class="scrim" id="scrim"></div>
@@ -565,7 +580,9 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzc5OqGvLbDdMIBvgjflC1H
   function renderBar(){
     if(!active){ $("bar").hidden = true; $("fabCount").hidden = true; return; }
     const n = cartCount();
+    const wasHidden = $("bar").hidden;
     $("bar").hidden = n === 0 || isOpen() || !$("welcome").hidden;
+    if(wasHidden && !$("bar").hidden) replay($("bar"), "enter-anim");
     $("barCount").textContent = n + (n === 1 ? " item" : " items");
     $("barDrop").textContent = drop(active).name;
     $("barTotal").textContent = money(cartTotal());
@@ -579,6 +596,20 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzc5OqGvLbDdMIBvgjflC1H
     if(delta > 0 && (!d.open || n > i.qty)) return;
     cart[id] = Math.max(0, n);
     render();
+    if(delta > 0 && !isOpen()) notifyAdd(i);
+  }
+
+  /* Make the checkout bar obvious: show what was added, bump it, and nudge again if they don't tap */
+  function replay(el, cls){ el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+  let addedT, nudgeT;
+  function notifyAdd(i){
+    const bar = $("bar");
+    $("barAdded").textContent = "✓ Added " + i.name;
+    bar.classList.add("show-added");
+    if(!bar.classList.contains("enter-anim") || bar.getAnimations().length === 0) replay(bar, "bump");
+    replay($("fabCount"), "pop");
+    clearTimeout(addedT); addedT = setTimeout(() => bar.classList.remove("show-added"), 3200);
+    clearTimeout(nudgeT); nudgeT = setTimeout(() => { if(!isOpen() && cartCount() && !bar.hidden) replay(bar, "bump"); }, 8000);
   }
 
   /* ---------- Sheet ---------- */
